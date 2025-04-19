@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Insulin Checklist Tracker (With XML Preview)</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 30px;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    label {
+      display: block;
+      margin: 5px 0 2px;
+    }
+    input[type="text"], input[type="number"], textarea {
+      width: 300px;
+      padding: 5px;
+    }
+    .slot {
+      margin-bottom: 20px;
+      border: 1px solid #ccc;
+      padding: 15px;
+      border-radius: 10px;
+      max-width: 400px;
+    }
+    button {
+      margin-right: 10px;
+      padding: 10px 15px;
+    }
+    pre {
+      background: #f0f0f0;
+      padding: 15px;
+      border-radius: 10px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-width: 800px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Insulin Checklist Tracker</h1>
+
+  <label for="datePicker"><strong>Select Date:</strong></label>
+  <input type="date" id="datePicker" />
+
+  <div class="slot" id="morning">
+    <h2>Morning</h2>
+    <label><input type="checkbox" id="morningTaken"> Taken</label>
+    <label>Doses:</label>
+    <input type="number" id="morningUnits">
+    <label>Notes:</label>
+    <textarea id="morningNotes"></textarea>
+  </div>
+
+  <div class="slot" id="afternoon">
+    <h2>Afternoon</h2>
+    <label><input type="checkbox" id="afternoonTaken"> Taken</label>
+    <label>Doses:</label>
+    <input type="number" id="afternoonUnits">
+    <label>Notes:</label>
+    <textarea id="afternoonNotes"></textarea>
+  </div>
+
+  <div class="slot" id="evening">
+    <h2>Evening</h2>
+    <label><input type="checkbox" id="eveningTaken"> Taken</label>
+    <label>Doses:</label>
+    <input type="number" id="eveningUnits">
+    <label>Notes:</label>
+    <textarea id="eveningNotes"></textarea>
+  </div>
+
+  <button onclick="downloadXML()">⬇️ Download XML</button>
+
+  <h2>📄 Live XML Preview</h2>
+  <pre id="xmlPreview">(XML preview will appear here...)</pre>
+
+  <script>
+    const slots = ["morning", "afternoon", "evening"];
+    const dateInput = document.getElementById("datePicker");
+    const preview = document.getElementById("xmlPreview");
+
+    function formatDate(date) {
+      return date.toISOString().split("T")[0];
+    }
+
+    function getSelectedDate() {
+      return dateInput.value;
+    }
+
+    function getXMLDataForDate(dateStr) {
+      const doc = document.implementation.createDocument("", "", null);
+      const root = doc.createElement("insulinChecklist");
+      root.setAttribute("date", dateStr);
+
+      slots.forEach(slot => {
+        const slotElem = doc.createElement("timeSlot");
+        slotElem.setAttribute("name", slot.charAt(0).toUpperCase() + slot.slice(1));
+
+        const taken = doc.createElement("taken");
+        taken.textContent = document.getElementById(`${slot}Taken`).checked;
+
+        const units = doc.createElement("units");
+        units.textContent = document.getElementById(`${slot}Units`).value;
+
+        const notes = doc.createElement("notes");
+        notes.textContent = document.getElementById(`${slot}Notes`).value;
+
+        slotElem.appendChild(taken);
+        slotElem.appendChild(units);
+        slotElem.appendChild(notes);
+        root.appendChild(slotElem);
+      });
+
+      doc.appendChild(root);
+      return new XMLSerializer().serializeToString(doc);
+    }
+
+    function saveToLocalStorage() {
+      const dateStr = getSelectedDate();
+      const xml = getXMLDataForDate(dateStr);
+      localStorage.setItem("insulinChecklist_" + dateStr, xml);
+      updatePreview();
+    }
+
+    function loadFromLocalStorage(dateStr) {
+      const xmlStr = localStorage.getItem("insulinChecklist_" + dateStr);
+      if (!xmlStr) {
+        clearFields();
+        updatePreview(); // Clear preview
+        return;
+      }
+
+      const parser = new DOMParser();
+      const xml = parser.parseFromString(xmlStr, "application/xml");
+      const slotsXML = xml.getElementsByTagName("timeSlot");
+
+      Array.from(slotsXML).forEach(slot => {
+        const name = slot.getAttribute("name").toLowerCase();
+        document.getElementById(`${name}Taken`).checked = slot.getElementsByTagName("taken")[0].textContent === "true";
+        document.getElementById(`${name}Units`).value = slot.getElementsByTagName("units")[0].textContent;
+        document.getElementById(`${name}Notes`).value = slot.getElementsByTagName("notes")[0].textContent;
+      });
+
+      updatePreview();
+    }
+
+    function clearFields() {
+      slots.forEach(slot => {
+        document.getElementById(`${slot}Taken`).checked = false;
+        document.getElementById(`${slot}Units`).value = "";
+        document.getElementById(`${slot}Notes`).value = "";
+      });
+    }
+
+    function attachAutoSave() {
+      slots.forEach(slot => {
+        ["Taken", "Units", "Notes"].forEach(field => {
+          document.getElementById(`${slot}${field}`).addEventListener("input", saveToLocalStorage);
+        });
+      });
+    }
+
+    function updatePreview() {
+      const dateStr = getSelectedDate();
+      const xml = getXMLDataForDate(dateStr);
+      preview.textContent = formatXML(xml);
+    }
+
+    function downloadXML() {
+      const dateStr = getSelectedDate();
+      const xmlStr = getXMLDataForDate(dateStr);
+      const blob = new Blob([xmlStr], { type: "application/xml" });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `insulin-checklist-${dateStr}.xml`;
+      a.click();
+
+      URL.revokeObjectURL(url);
+    }
+
+    function formatXML(xml) {
+      const PADDING = "  ";
+      const reg = /(>)(<)(\/*)/g;
+      let pad = 0;
+      return xml
+        .replace(reg, "$1\r\n$2$3")
+        .split("\r\n")
+        .map((node) => {
+          let indent = "";
+          if (node.match(/.+<\/\w[^>]*>$/)) {
+            indent = PADDING.repeat(pad);
+          } else if (node.match(/^<\/\w/)) {
+            pad = Math.max(pad - 1, 0);
+            indent = PADDING.repeat(pad);
+          } else if (node.match(/^<\w[^>]*[^/]>/)) {
+            indent = PADDING.repeat(pad++);
+          } else {
+            indent = PADDING.repeat(pad);
+          }
+          return indent + node;
+        })
+        .join("\r\n");
+    }
+
+    window.onload = function () {
+      const today = formatDate(new Date());
+      dateInput.value = today;
+      loadFromLocalStorage(today);
+      attachAutoSave();
+    };
+
+    dateInput.addEventListener("change", () => {
+      loadFromLocalStorage(getSelectedDate());
+    });
+  </script>
+</body>
+</html>
